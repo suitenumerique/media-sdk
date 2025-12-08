@@ -45,8 +45,11 @@ func (m *SDPMedia) SelectCodec() error {
 
 func (m *SDPMedia) Clone() *SDPMedia {
 	return &SDPMedia{
-		Kind:     m.Kind,
-		Disabled: m.Disabled,
+		Kind:      m.Kind,
+		Disabled:  m.Disabled,
+		Direction: m.Direction,
+		Content:   m.Content,
+		Label:     m.Label,
 		Codecs: func() []*Codec {
 			if m.Codecs == nil {
 				return nil
@@ -178,6 +181,15 @@ func (m *SDPMedia) parseArributes(md sdp.MediaDescription) error {
 			string(DirectionRecvOnly),
 			string(DirectionInactive):
 			m.Direction = Direction(attr.Key)
+		case "content":
+			// RFC 4796 content attribute (main, slides, alt, etc.)
+			m.Content = ContentType(attr.Value)
+		case "label":
+			// RFC 4796 label attribute for BFCP floor association
+			label, err := strconv.Atoi(attr.Value)
+			if err == nil && label >= 0 && label <= 65535 {
+				m.Label = uint16(label)
+			}
 		default:
 			// Ignore unknown attributes for now
 		}
@@ -277,6 +289,18 @@ func (m *SDPMedia) ToPion() (sdp.MediaDescription, error) {
 			Key: "rtcp", Value: strconv.Itoa(int(m.RTCPPort)),
 		})
 	}
+	// RFC 4796
+	if m.Content != "" {
+		attrs = append(attrs, sdp.Attribute{
+			Key: "content", Value: string(m.Content),
+		})
+	}
+	// RFC 4796
+	if m.Label > 0 {
+		attrs = append(attrs, sdp.Attribute{
+			Key: "label", Value: strconv.Itoa(int(m.Label)),
+		})
+	}
 	dir := m.Direction
 	if dir == "" {
 		dir = DirectionSendRecv
@@ -371,4 +395,59 @@ func (b *SDPMediaBuilder) SetDirection(direction Direction) *SDPMediaBuilder {
 func (b *SDPMediaBuilder) SetKind(kind MediaKind) *SDPMediaBuilder {
 	b.m.Kind = kind
 	return b
+}
+
+func (b *SDPMediaBuilder) SetContent(content ContentType) *SDPMediaBuilder {
+	b.m.Content = content
+	return b
+}
+
+func (b *SDPMediaBuilder) SetLabel(label uint16) *SDPMediaBuilder {
+	b.m.Label = label
+	return b
+}
+
+// PrepareForSending prepares an SDPMedia answer for sending data.
+// This is called after receiving an SDP answer when we want to send media to the remote.
+// It performs:
+// 1. Codec selection if not already set (picks first codec from Codecs list)
+// 2. Direction reversal (recvonly in answer means we sendonly)
+//
+// The remote's answer says "recvonly" (they will receive), so from our perspective
+// we need "sendonly" (we will send). This method handles that transformation.
+func (m *SDPMedia) PrepareForSending() error {
+	if m == nil || m.Disabled {
+		return nil
+	}
+
+	// Select a codec if not already selected
+	if m.Codec == nil && len(m.Codecs) > 0 {
+		m.Codec = m.Codecs[0]
+	}
+
+	if m.Codec == nil {
+		return fmt.Errorf("no codec available for sending")
+	}
+
+	// Reverse direction: if remote says recvonly (they receive), we sendonly (we send)
+	m.Direction = m.Direction.Reverse()
+
+	return nil
+}
+
+// NewScreenshareMediaFromCodec creates a screenshare SDPMedia using the given codec.
+// This preserves the codec's PayloadType for compatibility with SIP devices that
+// require consistent payload types between camera and content streams.
+func NewScreenshareMediaFromCodec(codec *Codec, rtpPort, rtcpPort uint16, label uint16) *SDPMedia {
+	c := codec.Clone()
+	return &SDPMedia{
+		Kind:      MediaKindVideo,
+		Content:   ContentTypeSlides,
+		Direction: DirectionSendOnly,
+		Label:     label,
+		Codec:     c,
+		Codecs:    []*Codec{c},
+		Port:      rtpPort,
+		RTCPPort:  rtcpPort,
+	}
 }
