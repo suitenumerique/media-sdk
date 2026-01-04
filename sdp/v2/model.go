@@ -203,16 +203,17 @@ func (f BfcpFloorCtrl) Reverse() BfcpFloorCtrl {
 
 // SDPBfcp describes a BFCP m=application section (RFC 8856)
 type SDPBfcp struct {
-	Disabled   bool           // Disabled is true when the port is zero (rejected m=)
-	Port       uint16         // Media port from m= line
-	Proto      BfcpProto      // Protocol: TCP/BFCP or TCP/TLS/BFCP
-	Setup      BfcpSetup      // Connection setup role (active/passive/actpass)
-	Connection BfcpConnection // Connection reuse policy (new/existing)
-	FloorCtrl  BfcpFloorCtrl  // Floor control role (c-only/s-only/c-s)
-	ConfID     uint32         // Conference ID
-	UserID     uint32         // User ID
-	FloorID    uint16         // Floor ID
-	MStreamID  uint16         // Media stream association (from floorid mstrm:X)
+	Disabled       bool           // Disabled is true when the port is zero (rejected m=)
+	Port           uint16         // Media port from m= line
+	Proto          BfcpProto      // Protocol: TCP/BFCP or TCP/TLS/BFCP
+	Setup          BfcpSetup      // Connection setup role (active/passive/actpass)
+	Connection     BfcpConnection // Connection reuse policy (new/existing)
+	FloorCtrl      BfcpFloorCtrl  // Floor control role (c-only/s-only/c-s)
+	ConfID         uint32         // Conference ID
+	UserID         uint32         // User ID
+	FloorID        uint16         // Floor ID
+	MStreamID      uint16         // Media stream association (from floorid mstrm:X)
+	ConnectionAddr netip.Addr     // Media-level connection address (c= line)
 }
 
 var _ interface {

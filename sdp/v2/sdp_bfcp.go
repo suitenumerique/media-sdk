@@ -3,6 +3,7 @@ package v2
 import (
 	"errors"
 	"fmt"
+	"net/netip"
 	"strconv"
 	"strings"
 
@@ -109,16 +110,17 @@ func (b *SDPBfcp) Clone() *SDPBfcp {
 		return nil
 	}
 	return &SDPBfcp{
-		Disabled:   b.Disabled,
-		Port:       b.Port,
-		Proto:      b.Proto,
-		Setup:      b.Setup,
-		Connection: b.Connection,
-		FloorCtrl:  b.FloorCtrl,
-		ConfID:     b.ConfID,
-		UserID:     b.UserID,
-		FloorID:    b.FloorID,
-		MStreamID:  b.MStreamID,
+		Disabled:       b.Disabled,
+		Port:           b.Port,
+		Proto:          b.Proto,
+		Setup:          b.Setup,
+		Connection:     b.Connection,
+		FloorCtrl:      b.FloorCtrl,
+		ConfID:         b.ConfID,
+		UserID:         b.UserID,
+		FloorID:        b.FloorID,
+		MStreamID:      b.MStreamID,
+		ConnectionAddr: b.ConnectionAddr,
 	}
 }
 
@@ -215,11 +217,12 @@ func (bb *SDPBfcpBuilder) SetDisabled(disabled bool) *SDPBfcpBuilder {
 
 // SDPBfcpAnswerConfig holds configuration for generating a BFCP answer.
 type SDPBfcpAnswerConfig struct {
-	Port      uint16 // Local port (0 = use offer port)
-	ConfID    uint32 // Conference ID (0 = use offer)
-	UserID    uint32 // User ID (0 = use offer)
-	FloorID   uint16 // Floor ID (0 = use offer)
-	MStreamID uint16 // Media stream ID (0 = use offer)
+	Port           uint16     // Local port (0 = use offer port)
+	ConnectionAddr netip.Addr // Media-level connection address for c= line
+	ConfID         uint32     // Conference ID (0 = use offer)
+	UserID         uint32     // User ID (0 = use offer)
+	FloorID        uint16     // Floor ID (0 = use offer)
+	MStreamID      uint16     // Media stream ID (0 = use offer)
 }
 
 // Answer creates a BFCP answer from this offer with reversed roles.
@@ -255,16 +258,17 @@ func (b *SDPBfcp) Answer(config *SDPBfcpAnswerConfig) *SDPBfcp {
 	}
 
 	return &SDPBfcp{
-		Disabled:   port == 0,
-		Port:       port,
-		Proto:      b.Proto,
-		Setup:      b.Setup.Reverse(),
-		Connection: BfcpConnectionNew,
-		FloorCtrl:  b.FloorCtrl.Reverse(),
-		ConfID:     confID,
-		UserID:     userID,
-		FloorID:    floorID,
-		MStreamID:  mstrmID,
+		Disabled:       port == 0,
+		Port:           port,
+		Proto:          b.Proto,
+		Setup:          b.Setup.Reverse(),
+		Connection:     BfcpConnectionNew,
+		FloorCtrl:      b.FloorCtrl.Reverse(),
+		ConfID:         confID,
+		UserID:         userID,
+		FloorID:        floorID,
+		MStreamID:      mstrmID,
+		ConnectionAddr: config.ConnectionAddr,
 	}
 }
 
@@ -282,6 +286,11 @@ func (b *SDPBfcp) Marshal() (string, error) {
 		strings.Join(md.MediaName.Protos, "/"),
 		strings.Join(md.MediaName.Formats, " "),
 	)
+
+	// Add media-level c= line if ConnectionAddr is set
+	if b.ConnectionAddr.IsValid() {
+		result += fmt.Sprintf("c=IN IP4 %s\r\n", b.ConnectionAddr.String())
+	}
 
 	for _, attr := range md.Attributes {
 		if attr.Value != "" {
