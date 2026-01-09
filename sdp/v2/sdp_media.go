@@ -15,6 +15,7 @@ import (
 )
 
 // SelectCodec finds the best codec according to priority rules set by Codec.Info().Priority.
+// For H264, it prefers packetization-mode=1 over mode=0 for proper RTP fragmentation.
 func (m *SDPMedia) SelectCodec() error {
 	if m.Disabled || len(m.Codecs) == 0 {
 		return nil
@@ -29,9 +30,18 @@ func (m *SDPMedia) SelectCodec() error {
 		}
 
 		info := codec.Codec.Info()
-		if bestCodec == nil || info.Priority > bestPriority {
+		priority := info.Priority
+
+		// Prefer H264 with packetization-mode=1 for proper RTP fragmentation
+		if strings.Contains(info.SDPName, "H264") {
+			if mode, ok := codec.FMTP["packetization-mode"]; ok && mode == "1" {
+				priority += 10
+			}
+		}
+
+		if bestCodec == nil || priority > bestPriority {
 			bestCodec = codec
-			bestPriority = info.Priority
+			bestPriority = priority
 		}
 	}
 
@@ -160,6 +170,18 @@ func (m *SDPMedia) parseArributes(md sdp.MediaDescription) error {
 		case "rtcp-fb":
 			sub := strings.SplitN(attr.Value, " ", 2)
 			if len(sub) != 2 {
+				continue
+			}
+			// Handle wildcard rtcp-fb (applies to all payload types)
+			if sub[0] == "*" {
+				for pt := range tracks {
+					ti := tracks[pt]
+					ti.rtcpFb = append(ti.rtcpFb, sdp.Attribute{
+						Key:   "rtcp-fb",
+						Value: attr.Value,
+					})
+					tracks[pt] = ti
+				}
 				continue
 			}
 			typ, err := strconv.Atoi(sub[0])
