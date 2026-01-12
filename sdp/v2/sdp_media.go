@@ -15,7 +15,8 @@ import (
 )
 
 // SelectCodec finds the best codec according to priority rules set by Codec.Info().Priority.
-// For H264, it prefers packetization-mode=1 over mode=0 for proper RTP fragmentation.
+// Note: packetization-mode preference was removed because some SIP devices (e.g., Polycom)
+// don't respect codec negotiation and use their own preferred codec regardless of the answer.
 func (m *SDPMedia) SelectCodec() error {
 	if m.Disabled || len(m.Codecs) == 0 {
 		return nil
@@ -31,13 +32,6 @@ func (m *SDPMedia) SelectCodec() error {
 
 		info := codec.Codec.Info()
 		priority := info.Priority
-
-		// Prefer H264 with packetization-mode=1 for proper RTP fragmentation
-		if strings.Contains(info.SDPName, "H264") {
-			if mode, ok := codec.FMTP["packetization-mode"]; ok && mode == "1" {
-				priority += 10
-			}
-		}
 
 		if bestCodec == nil || priority > bestPriority {
 			bestCodec = codec
