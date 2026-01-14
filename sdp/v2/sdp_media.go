@@ -15,7 +15,7 @@ import (
 )
 
 // SelectCodec selects the best codec based on Codec.Info().Priority.
-// H264 with packetization-mode=1 gets +10 priority boost.
+// H264: +10 for packetization-mode=1, +5 for Baseline profile (42xxxx).
 func (m *SDPMedia) SelectCodec() error {
 	if m.Disabled || len(m.Codecs) == 0 {
 		return nil
@@ -32,10 +32,13 @@ func (m *SDPMedia) SelectCodec() error {
 		info := codec.Codec.Info()
 		priority := info.Priority
 
-		// H264: prefer packetization-mode=1
+		// H264: prefer packetization-mode=1 and Baseline profile
 		if strings.HasPrefix(codec.Name, "H264/") {
 			if pm, ok := codec.FMTP["packetization-mode"]; ok && pm == "1" {
 				priority += 10
+			}
+			if profile, ok := codec.FMTP["profile-level-id"]; ok && strings.HasPrefix(profile, "42") {
+				priority += 5
 			}
 		}
 
