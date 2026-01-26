@@ -101,6 +101,15 @@ func (b *SDPBfcp) ToPion() (sdp.MediaDescription, error) {
 		Attributes: attrs,
 	}
 
+	// Add media-level c= line if ConnectionAddr is set
+	if b.ConnectionAddr.IsValid() {
+		md.ConnectionInformation = &sdp.ConnectionInformation{
+			NetworkType: "IN",
+			AddressType: "IP4",
+			Address:     &sdp.Address{Address: b.ConnectionAddr.String()},
+		}
+	}
+
 	return md, nil
 }
 
@@ -212,6 +221,12 @@ func (bb *SDPBfcpBuilder) SetDisabled(disabled bool) *SDPBfcpBuilder {
 	if disabled {
 		bb.b.Port = 0
 	}
+	return bb
+}
+
+// SetConnectionAddr sets the media-level connection address for the BFCP c= line.
+func (bb *SDPBfcpBuilder) SetConnectionAddr(addr netip.Addr) *SDPBfcpBuilder {
+	bb.b.ConnectionAddr = addr
 	return bb
 }
 
