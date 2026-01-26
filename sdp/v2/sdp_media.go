@@ -408,6 +408,21 @@ func (b *SDPMediaBuilder) AddCodec(fn func(b *CodecBuilder) (*Codec, error), pre
 	return b
 }
 
+// CopyDTMFCodec copies the telephone-event (DTMF) codec from source media if present.
+// This is needed for SDP answers to support DTMF during PIN prompts.
+func (b *SDPMediaBuilder) CopyDTMFCodec(from *SDPMedia) *SDPMediaBuilder {
+	if from == nil {
+		return b
+	}
+	for _, c := range from.Codecs {
+		if strings.HasPrefix(c.Name, "telephone-event") {
+			b.m.Codecs = append(b.m.Codecs, c.Clone())
+			break
+		}
+	}
+	return b
+}
+
 func (b *SDPMediaBuilder) SetSecurity(security Security) *SDPMediaBuilder {
 	panic("not implemented")
 }
