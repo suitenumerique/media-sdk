@@ -82,7 +82,10 @@ func (b *SDPBfcp) ToPion() (sdp.MediaDescription, error) {
 	attrs = append(attrs, sdp.Attribute{Key: "floorid", Value: floorValue})
 
 	protos := []string{"TCP", "BFCP"}
-	if b.Proto == BfcpProtoTCPTLS {
+	switch b.Proto {
+	case BfcpProtoUDP:
+		protos = []string{"UDP", "BFCP"}
+	case BfcpProtoTCPTLS:
 		protos = []string{"TCP", "TLS", "BFCP"}
 	}
 

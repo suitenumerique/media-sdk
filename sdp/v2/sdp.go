@@ -45,6 +45,10 @@ func (s *SDP) FromPion(sd sdp.SessionDescription) error {
 	}
 	s.Addr = addr
 
+	// Initialize m-line order tracking
+	s.MLineOrder = make([]MLineType, 0, len(sd.MediaDescriptions))
+	s.UnknownMedia = nil
+
 	slog.Debug("SDP FromPion: parsing session",
 		"origin", sd.Origin.UnicastAddress,
 		"sessionName", string(sd.SessionName),
@@ -80,9 +84,17 @@ func (s *SDP) FromPion(sd sdp.SessionDescription) error {
 						"index", i,
 						"error", err.Error(),
 					)
+					// Track as unknown to preserve order
+					s.MLineOrder = append(s.MLineOrder, MLineUnknown)
+					s.UnknownMedia = append(s.UnknownMedia, &SDPMedia{
+						Kind:     MediaKindApplication,
+						Disabled: true,
+						Port:     0,
+					})
 					continue
 				}
 				s.BFCP = bfcp
+				s.MLineOrder = append(s.MLineOrder, MLineBFCP)
 				slog.Debug("SDP FromPion: parsed BFCP media",
 					"port", bfcp.Port,
 					"proto", bfcp.Proto,
@@ -91,22 +103,40 @@ func (s *SDP) FromPion(sd sdp.SessionDescription) error {
 				)
 				continue
 			}
+			// Non-BFCP application (e.g., H224) - store as unknown for RFC 3264 compliance
+			slog.Debug("SDP FromPion: storing unknown application media",
+				"index", i,
+				"proto", proto,
+			)
+			s.MLineOrder = append(s.MLineOrder, MLineUnknown)
+			s.UnknownMedia = append(s.UnknownMedia, &SDPMedia{
+				Kind:     MediaKindApplication,
+				Disabled: true,
+				Port:     0,
+			})
+			continue
 		}
 
 		sm := &SDPMedia{}
 		if err := sm.FromPion(*md); err != nil {
-			// Skip unsupported media kinds (e.g., "application" for H224)
-			// instead of failing the entire SDP parsing
-			slog.Debug("SDP FromPion: skipping unsupported media",
+			// Store unsupported media as unknown to preserve m-line order
+			slog.Debug("SDP FromPion: storing unsupported media as unknown",
 				"index", i,
 				"mediaName", md.MediaName.Media,
 				"error", err.Error(),
 			)
+			s.MLineOrder = append(s.MLineOrder, MLineUnknown)
+			s.UnknownMedia = append(s.UnknownMedia, &SDPMedia{
+				Kind:     MediaKind(md.MediaName.Media),
+				Disabled: true,
+				Port:     0,
+			})
 			continue
 		}
 		switch sm.Kind {
 		case MediaKindAudio:
 			s.Audio = sm
+			s.MLineOrder = append(s.MLineOrder, MLineAudio)
 			slog.Debug("SDP FromPion: parsed audio media",
 				"port", sm.Port,
 				"direction", sm.Direction,
@@ -116,6 +146,7 @@ func (s *SDP) FromPion(sd sdp.SessionDescription) error {
 			// Check if this is screenshare (content:slides) or camera video
 			if sm.Content == ContentTypeSlides {
 				s.Screenshare = sm
+				s.MLineOrder = append(s.MLineOrder, MLineScreenshare)
 				slog.Debug("SDP FromPion: parsed screenshare media",
 					"port", sm.Port,
 					"direction", sm.Direction,
@@ -124,6 +155,7 @@ func (s *SDP) FromPion(sd sdp.SessionDescription) error {
 				)
 			} else {
 				s.Video = sm
+				s.MLineOrder = append(s.MLineOrder, MLineVideo)
 				slog.Debug("SDP FromPion: parsed video media",
 					"port", sm.Port,
 					"direction", sm.Direction,
@@ -132,13 +164,20 @@ func (s *SDP) FromPion(sd sdp.SessionDescription) error {
 				)
 			}
 		default:
-			// Skip unsupported media kinds
-			slog.Debug("SDP FromPion: skipping unknown media kind",
+			// Store unsupported media kinds as unknown
+			slog.Debug("SDP FromPion: storing unknown media kind",
 				"kind", sm.Kind,
 			)
+			s.MLineOrder = append(s.MLineOrder, MLineUnknown)
+			s.UnknownMedia = append(s.UnknownMedia, sm)
 			continue
 		}
 	}
+
+	slog.Debug("SDP FromPion: complete",
+		"mlineOrder", s.MLineOrder,
+		"unknownCount", len(s.UnknownMedia),
+	)
 
 	return nil
 }
@@ -152,6 +191,7 @@ func (s *SDP) ToPion() (sdp.SessionDescription, error) {
 		"hasVideo", s.Video != nil,
 		"hasScreenshare", s.Screenshare != nil,
 		"hasBFCP", s.BFCP != nil,
+		"mlineOrder", s.MLineOrder,
 	)
 
 	sd := sdp.SessionDescription{
@@ -179,50 +219,180 @@ func (s *SDP) ToPion() (sdp.SessionDescription, error) {
 			},
 		},
 	}
-	if s.Audio != nil {
-		audioMD, err := s.Audio.ToPion()
-		if err != nil {
-			return sd, fmt.Errorf("failed to convert audio media: %w", err)
+
+	// If MLineOrder is set, use it to preserve RFC 3264 compliant ordering
+	if len(s.MLineOrder) > 0 {
+		// Track which media types were added from the offer order
+		addedAudio := false
+		addedVideo := false
+		addedScreenshare := false
+		addedBFCP := false
+
+		unknownIdx := 0
+		for _, mtype := range s.MLineOrder {
+			switch mtype {
+			case MLineAudio:
+				if s.Audio != nil {
+					audioMD, err := s.Audio.ToPion()
+					if err != nil {
+						return sd, fmt.Errorf("failed to convert audio media: %w", err)
+					}
+					sd.MediaDescriptions = append(sd.MediaDescriptions, &audioMD)
+					addedAudio = true
+					slog.Debug("SDP ToPion: added audio media (ordered)",
+						"port", audioMD.MediaName.Port.Value,
+						"proto", audioMD.MediaName.Protos,
+					)
+				}
+			case MLineVideo:
+				if s.Video != nil {
+					videoMD, err := s.Video.ToPion()
+					if err != nil {
+						return sd, fmt.Errorf("failed to convert video media: %w", err)
+					}
+					sd.MediaDescriptions = append(sd.MediaDescriptions, &videoMD)
+					addedVideo = true
+					slog.Debug("SDP ToPion: added video media (ordered)",
+						"port", videoMD.MediaName.Port.Value,
+						"proto", videoMD.MediaName.Protos,
+					)
+				}
+			case MLineScreenshare:
+				if s.Screenshare != nil {
+					screenshareMD, err := s.Screenshare.ToPion()
+					if err != nil {
+						return sd, fmt.Errorf("failed to convert screenshare media: %w", err)
+					}
+					sd.MediaDescriptions = append(sd.MediaDescriptions, &screenshareMD)
+					addedScreenshare = true
+					slog.Debug("SDP ToPion: added screenshare media (ordered)",
+						"port", screenshareMD.MediaName.Port.Value,
+						"proto", screenshareMD.MediaName.Protos,
+						"content", s.Screenshare.Content,
+					)
+				}
+			case MLineBFCP:
+				if s.BFCP != nil && !s.BFCP.Disabled {
+					bfcpMD, err := s.BFCP.ToPion()
+					if err != nil {
+						return sd, fmt.Errorf("failed to convert BFCP media: %w", err)
+					}
+					sd.MediaDescriptions = append(sd.MediaDescriptions, &bfcpMD)
+					addedBFCP = true
+					slog.Debug("SDP ToPion: added BFCP media (ordered)",
+						"port", bfcpMD.MediaName.Port.Value,
+						"proto", bfcpMD.MediaName.Protos,
+					)
+				}
+			case MLineUnknown:
+				// Include rejected m-line with port=0 for RFC 3264 compliance
+				if unknownIdx < len(s.UnknownMedia) {
+					um := s.UnknownMedia[unknownIdx]
+					unknownIdx++
+					rejectedMD, err := um.ToPion()
+					if err != nil {
+						slog.Debug("SDP ToPion: skipping unknown media due to error",
+							"error", err.Error(),
+						)
+						continue
+					}
+					// Ensure port is 0 for rejected media
+					rejectedMD.MediaName.Port.Value = 0
+					sd.MediaDescriptions = append(sd.MediaDescriptions, &rejectedMD)
+					slog.Debug("SDP ToPion: added rejected media (ordered)",
+						"kind", um.Kind,
+						"port", 0,
+					)
+				}
+			}
 		}
-		sd.MediaDescriptions = append(sd.MediaDescriptions, &audioMD)
-		slog.Debug("SDP ToPion: added audio media",
-			"port", audioMD.MediaName.Port.Value,
-			"proto", audioMD.MediaName.Protos,
-		)
-	}
-	if s.Video != nil {
-		videoMD, err := s.Video.ToPion()
-		if err != nil {
-			return sd, fmt.Errorf("failed to convert video media: %w", err)
+
+		// Append any media that exists but wasn't in the offer order
+		// This handles cases like Poly where we want to ADD screenshare to the answer
+		if s.Audio != nil && !addedAudio {
+			audioMD, err := s.Audio.ToPion()
+			if err == nil {
+				sd.MediaDescriptions = append(sd.MediaDescriptions, &audioMD)
+				slog.Debug("SDP ToPion: added audio media (extra)",
+					"port", audioMD.MediaName.Port.Value,
+				)
+			}
 		}
-		sd.MediaDescriptions = append(sd.MediaDescriptions, &videoMD)
-		slog.Debug("SDP ToPion: added video media",
-			"port", videoMD.MediaName.Port.Value,
-			"proto", videoMD.MediaName.Protos,
-		)
-	}
-	if s.Screenshare != nil {
-		screenshareMD, err := s.Screenshare.ToPion()
-		if err != nil {
-			return sd, fmt.Errorf("failed to convert screenshare media: %w", err)
+		if s.Video != nil && !addedVideo {
+			videoMD, err := s.Video.ToPion()
+			if err == nil {
+				sd.MediaDescriptions = append(sd.MediaDescriptions, &videoMD)
+				slog.Debug("SDP ToPion: added video media (extra)",
+					"port", videoMD.MediaName.Port.Value,
+				)
+			}
 		}
-		sd.MediaDescriptions = append(sd.MediaDescriptions, &screenshareMD)
-		slog.Debug("SDP ToPion: added screenshare media",
-			"port", screenshareMD.MediaName.Port.Value,
-			"proto", screenshareMD.MediaName.Protos,
-			"content", s.Screenshare.Content,
-		)
-	}
-	if s.BFCP != nil && !s.BFCP.Disabled {
-		bfcpMD, err := s.BFCP.ToPion()
-		if err != nil {
-			return sd, fmt.Errorf("failed to convert BFCP media: %w", err)
+		if s.Screenshare != nil && !addedScreenshare {
+			screenshareMD, err := s.Screenshare.ToPion()
+			if err == nil {
+				sd.MediaDescriptions = append(sd.MediaDescriptions, &screenshareMD)
+				slog.Debug("SDP ToPion: added screenshare media (extra)",
+					"port", screenshareMD.MediaName.Port.Value,
+					"content", s.Screenshare.Content,
+				)
+			}
 		}
-		sd.MediaDescriptions = append(sd.MediaDescriptions, &bfcpMD)
-		slog.Debug("SDP ToPion: added BFCP media",
-			"port", bfcpMD.MediaName.Port.Value,
-			"proto", bfcpMD.MediaName.Protos,
-		)
+		if s.BFCP != nil && !s.BFCP.Disabled && !addedBFCP {
+			bfcpMD, err := s.BFCP.ToPion()
+			if err == nil {
+				sd.MediaDescriptions = append(sd.MediaDescriptions, &bfcpMD)
+				slog.Debug("SDP ToPion: added BFCP media (extra)",
+					"port", bfcpMD.MediaName.Port.Value,
+				)
+			}
+		}
+	} else {
+		// Fallback to legacy hardcoded order for backwards compatibility
+		if s.Audio != nil {
+			audioMD, err := s.Audio.ToPion()
+			if err != nil {
+				return sd, fmt.Errorf("failed to convert audio media: %w", err)
+			}
+			sd.MediaDescriptions = append(sd.MediaDescriptions, &audioMD)
+			slog.Debug("SDP ToPion: added audio media",
+				"port", audioMD.MediaName.Port.Value,
+				"proto", audioMD.MediaName.Protos,
+			)
+		}
+		if s.Video != nil {
+			videoMD, err := s.Video.ToPion()
+			if err != nil {
+				return sd, fmt.Errorf("failed to convert video media: %w", err)
+			}
+			sd.MediaDescriptions = append(sd.MediaDescriptions, &videoMD)
+			slog.Debug("SDP ToPion: added video media",
+				"port", videoMD.MediaName.Port.Value,
+				"proto", videoMD.MediaName.Protos,
+			)
+		}
+		if s.Screenshare != nil {
+			screenshareMD, err := s.Screenshare.ToPion()
+			if err != nil {
+				return sd, fmt.Errorf("failed to convert screenshare media: %w", err)
+			}
+			sd.MediaDescriptions = append(sd.MediaDescriptions, &screenshareMD)
+			slog.Debug("SDP ToPion: added screenshare media",
+				"port", screenshareMD.MediaName.Port.Value,
+				"proto", screenshareMD.MediaName.Protos,
+				"content", s.Screenshare.Content,
+			)
+		}
+		if s.BFCP != nil && !s.BFCP.Disabled {
+			bfcpMD, err := s.BFCP.ToPion()
+			if err != nil {
+				return sd, fmt.Errorf("failed to convert BFCP media: %w", err)
+			}
+			sd.MediaDescriptions = append(sd.MediaDescriptions, &bfcpMD)
+			slog.Debug("SDP ToPion: added BFCP media",
+				"port", bfcpMD.MediaName.Port.Value,
+				"proto", bfcpMD.MediaName.Protos,
+			)
+		}
 	}
 
 	slog.Debug("SDP ToPion: complete",
@@ -250,6 +420,18 @@ func (s *SDP) Clone() *SDP {
 	}
 	if s.BFCP != nil {
 		clone.BFCP = s.BFCP.Clone()
+	}
+	// Clone MLineOrder slice
+	if len(s.MLineOrder) > 0 {
+		clone.MLineOrder = make([]MLineType, len(s.MLineOrder))
+		copy(clone.MLineOrder, s.MLineOrder)
+	}
+	// Clone UnknownMedia slice
+	if len(s.UnknownMedia) > 0 {
+		clone.UnknownMedia = make([]*SDPMedia, len(s.UnknownMedia))
+		for i, um := range s.UnknownMedia {
+			clone.UnknownMedia[i] = um.Clone()
+		}
 	}
 	return clone
 }
@@ -329,5 +511,26 @@ func (b *SDPBuilder) SetBFCP(fn func(b *SDPBfcpBuilder) (*SDPBfcp, error)) *SDPB
 		return b
 	}
 	b.s.BFCP = bfcp
+	return b
+}
+
+// SetMLineOrder sets the m-line order for RFC 3264 compliant SDP generation.
+// This should be copied from the parsed offer to ensure the answer has the same order.
+func (b *SDPBuilder) SetMLineOrder(order []MLineType) *SDPBuilder {
+	if len(order) > 0 {
+		b.s.MLineOrder = make([]MLineType, len(order))
+		copy(b.s.MLineOrder, order)
+	}
+	return b
+}
+
+// SetUnknownMedia sets the unknown/rejected media for RFC 3264 compliant SDP generation.
+func (b *SDPBuilder) SetUnknownMedia(media []*SDPMedia) *SDPBuilder {
+	if len(media) > 0 {
+		b.s.UnknownMedia = make([]*SDPMedia, len(media))
+		for i, m := range media {
+			b.s.UnknownMedia[i] = m.Clone()
+		}
+	}
 	return b
 }

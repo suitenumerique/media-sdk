@@ -10,15 +10,28 @@ import (
 	"github.com/livekit/media-sdk/srtp"
 )
 
+// MLineType represents the type of media in an m-line for ordering purposes
+type MLineType int
+
+const (
+	MLineAudio       MLineType = iota // Audio m-line
+	MLineVideo                        // Video (camera) m-line
+	MLineScreenshare                  // Video with content:slides m-line
+	MLineBFCP                         // BFCP application m-line
+	MLineUnknown                      // Unknown/unsupported m-line (H224, etc.)
+)
+
 // SDP wraps a pion SessionDescription and the interpreted media sections.
 // The raw SDP remains available for round-tripping while Media holds
 // higher-level details extracted from each m= block.
 type SDP struct {
-	Addr        netip.Addr
-	Audio       *SDPMedia
-	Video       *SDPMedia
-	Screenshare *SDPMedia // Video with content:slides attribute
-	BFCP        *SDPBfcp  // BFCP floor control (RFC 8856)
+	Addr         netip.Addr
+	Audio        *SDPMedia
+	Video        *SDPMedia
+	Screenshare  *SDPMedia   // Video with content:slides attribute
+	BFCP         *SDPBfcp    // BFCP floor control (RFC 8856)
+	MLineOrder   []MLineType // Order of m-lines from parsed offer (for RFC 3264 compliance)
+	UnknownMedia []*SDPMedia // Rejected/unknown m-lines (H224, etc.) for RFC 3264 compliance
 }
 
 var _ interface {
@@ -143,8 +156,9 @@ type Security struct {
 type BfcpProto string
 
 const (
-	BfcpProtoTCP    BfcpProto = "TCP/BFCP"
-	BfcpProtoTCPTLS BfcpProto = "TCP/TLS/BFCP"
+	BfcpProtoUDP    BfcpProto = "UDP/BFCP"     // RFC 8855 (UDP transport)
+	BfcpProtoTCP    BfcpProto = "TCP/BFCP"     // RFC 4582 (TCP transport)
+	BfcpProtoTCPTLS BfcpProto = "TCP/TLS/BFCP" // RFC 4582 (TLS over TCP)
 )
 
 // BfcpSetup represents the BFCP connection setup role (RFC 4145 / RFC 8856)
