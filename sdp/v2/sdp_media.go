@@ -284,8 +284,13 @@ func (m *SDPMedia) ToPion() (sdp.MediaDescription, error) {
 	for _, codec := range m.Codecs {
 		styp := strconv.Itoa(int(codec.PayloadType))
 		formats = append(formats, styp)
+		// Use Name if Codec is nil (e.g., for DTMF added via AddDTMFCodec)
+		sdpName := codec.Name
+		if codec.Codec != nil {
+			sdpName = codec.Codec.Info().SDPName
+		}
 		attrs = append(attrs, sdp.Attribute{
-			Key: "rtpmap", Value: styp + " " + codec.Codec.Info().SDPName,
+			Key: "rtpmap", Value: styp + " " + sdpName,
 		})
 
 		if len(codec.FMTP) > 0 {
@@ -420,6 +425,20 @@ func (b *SDPMediaBuilder) CopyDTMFCodec(from *SDPMedia) *SDPMediaBuilder {
 			break
 		}
 	}
+	return b
+}
+
+// AddDTMFCodec adds the telephone-event (DTMF) codec to the media.
+// This is needed for SDP offers in delayed offer scenarios where there's no source SDP to copy from.
+func (b *SDPMediaBuilder) AddDTMFCodec() *SDPMediaBuilder {
+	// Use payload type 101 which is conventional for telephone-event
+	dtmfCodec := &Codec{
+		Name:        "telephone-event/8000",
+		PayloadType: 101,
+		ClockRate:   8000,
+		FMTP:        map[string]string{"": "0-16"},
+	}
+	b.m.Codecs = append(b.m.Codecs, dtmfCodec)
 	return b
 }
 
