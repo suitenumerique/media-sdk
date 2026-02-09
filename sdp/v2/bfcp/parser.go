@@ -65,9 +65,17 @@ func parseFloorID(value string, info *MediaInfo) {
 			info.FloorID = uint16(v)
 		}
 	}
-	if len(parts) >= 2 && strings.HasPrefix(parts[1], "mstrm:") {
-		if v, err := strconv.ParseUint(strings.TrimPrefix(parts[1], "mstrm:"), 10, 16); err == nil {
-			info.MStreamID = uint16(v)
+	if len(parts) >= 2 {
+		var mstrmValue string
+		if strings.HasPrefix(parts[1], "mstrm:") {
+			mstrmValue = strings.TrimPrefix(parts[1], "mstrm:")
+		} else if strings.HasPrefix(parts[1], "m-stream:") {
+			mstrmValue = strings.TrimPrefix(parts[1], "m-stream:")
+		}
+		if mstrmValue != "" {
+			if v, err := strconv.ParseUint(mstrmValue, 10, 16); err == nil {
+				info.MStreamID = uint16(v)
+			}
 		}
 	}
 }
