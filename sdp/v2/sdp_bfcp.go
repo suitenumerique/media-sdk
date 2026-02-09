@@ -46,6 +46,13 @@ func (b *SDPBfcp) FromPion(md sdp.MediaDescription) error {
 		}
 	}
 
+	// Parse media-level c= line for connection address
+	if md.ConnectionInformation != nil && md.ConnectionInformation.Address != nil {
+		if addr, err := netip.ParseAddr(md.ConnectionInformation.Address.Address); err == nil {
+			b.ConnectionAddr = addr
+		}
+	}
+
 	return nil
 }
 
@@ -58,9 +65,17 @@ func (b *SDPBfcp) parseFloorID(value string) {
 			b.FloorID = uint16(v)
 		}
 	}
-	if len(parts) >= 2 && strings.HasPrefix(parts[1], "mstrm:") {
-		if v, err := strconv.ParseUint(strings.TrimPrefix(parts[1], "mstrm:"), 10, 16); err == nil {
-			b.MStreamID = uint16(v)
+	if len(parts) >= 2 {
+		var mstrmValue string
+		if strings.HasPrefix(parts[1], "mstrm:") {
+			mstrmValue = strings.TrimPrefix(parts[1], "mstrm:")
+		} else if strings.HasPrefix(parts[1], "m-stream:") {
+			mstrmValue = strings.TrimPrefix(parts[1], "m-stream:")
+		}
+		if mstrmValue != "" {
+			if v, err := strconv.ParseUint(mstrmValue, 10, 16); err == nil {
+				b.MStreamID = uint16(v)
+			}
 		}
 	}
 }
