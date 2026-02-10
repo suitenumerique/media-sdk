@@ -11,6 +11,22 @@ import (
 	"github.com/pion/sdp/v3"
 )
 
+// hasBFCPAttributes checks if an application m-line has BFCP-specific attributes
+// (floorid + floorctrl) regardless of protocol.
+func hasBFCPAttributes(attrs []sdp.Attribute) bool {
+	hasFloorID := false
+	hasFloorCtrl := false
+	for _, attr := range attrs {
+		switch attr.Key {
+		case "floorid":
+			hasFloorID = true
+		case "floorctrl":
+			hasFloorCtrl = true
+		}
+	}
+	return hasFloorID && hasFloorCtrl
+}
+
 func NewSDP(sdpData []byte) (*SDP, error) {
 	s := &SDP{}
 	if err := s.Unmarshal(sdpData); err != nil {
@@ -74,17 +90,20 @@ func (s *SDP) FromPion(sd sdp.SessionDescription) error {
 			)
 		}
 
-		// Check for BFCP media (application with BFCP protocol)
+		// Check for BFCP media (application with BFCP protocol or BFCP attributes)
 		if md.MediaName.Media == "application" {
 			proto := strings.Join(md.MediaName.Protos, "/")
-			if strings.Contains(strings.ToUpper(proto), "BFCP") {
+			isBFCPProto := strings.Contains(strings.ToUpper(proto), "BFCP")
+			isBFCPAttrs := !isBFCPProto && hasBFCPAttributes(md.Attributes)
+
+			if isBFCPProto || isBFCPAttrs {
 				bfcp := &SDPBfcp{}
 				if err := bfcp.FromPion(*md); err != nil {
 					slog.Debug("SDP FromPion: skipping invalid BFCP",
 						"index", i,
 						"error", err.Error(),
 					)
-					// Track as unknown to preserve order
+					// Store as unknown m-line placeholder
 					s.MLineOrder = append(s.MLineOrder, MLineUnknown)
 					s.UnknownMedia = append(s.UnknownMedia, &SDPMedia{
 						Kind:     MediaKindApplication,
@@ -100,10 +119,11 @@ func (s *SDP) FromPion(sd sdp.SessionDescription) error {
 					"proto", bfcp.Proto,
 					"setup", bfcp.Setup,
 					"floorctrl", bfcp.FloorCtrl,
+					"detectedByAttrs", isBFCPAttrs,
 				)
 				continue
 			}
-			// Non-BFCP application (e.g., H224) - store as unknown for RFC 3264 compliance
+			// Non-BFCP application (e.g., H224) — store as unknown m-line
 			slog.Debug("SDP FromPion: storing unknown application media",
 				"index", i,
 				"proto", proto,
@@ -119,7 +139,7 @@ func (s *SDP) FromPion(sd sdp.SessionDescription) error {
 
 		sm := &SDPMedia{}
 		if err := sm.FromPion(*md); err != nil {
-			// Store unsupported media as unknown to preserve m-line order
+			// Store unsupported media as unknown m-line placeholder
 			slog.Debug("SDP FromPion: storing unsupported media as unknown",
 				"index", i,
 				"mediaName", md.MediaName.Media,
@@ -220,9 +240,9 @@ func (s *SDP) ToPion() (sdp.SessionDescription, error) {
 		},
 	}
 
-	// If MLineOrder is set, use it to preserve RFC 3264 compliant ordering
+	// Emit m-lines in the specified order (RFC 3264)
 	if len(s.MLineOrder) > 0 {
-		// Track which media types were added from the offer order
+		// Track which media types have been added
 		addedAudio := false
 		addedVideo := false
 		addedScreenshare := false
@@ -285,7 +305,7 @@ func (s *SDP) ToPion() (sdp.SessionDescription, error) {
 					)
 				}
 			case MLineUnknown:
-				// Include rejected m-line with port=0 for RFC 3264 compliance
+				// Rejected m-line with port=0
 				if unknownIdx < len(s.UnknownMedia) {
 					um := s.UnknownMedia[unknownIdx]
 					unknownIdx++
@@ -307,8 +327,7 @@ func (s *SDP) ToPion() (sdp.SessionDescription, error) {
 			}
 		}
 
-		// Append any media that exists but wasn't in the offer order
-		// This handles cases like Poly where we want to ADD screenshare to the answer
+		// Append any media not already included in the ordered list
 		if s.Audio != nil && !addedAudio {
 			audioMD, err := s.Audio.ToPion()
 			if err == nil {
@@ -347,7 +366,7 @@ func (s *SDP) ToPion() (sdp.SessionDescription, error) {
 			}
 		}
 	} else {
-		// Fallback to legacy hardcoded order for backwards compatibility
+		// Default order: audio, video, screenshare, BFCP
 		if s.Audio != nil {
 			audioMD, err := s.Audio.ToPion()
 			if err != nil {
@@ -514,8 +533,7 @@ func (b *SDPBuilder) SetBFCP(fn func(b *SDPBfcpBuilder) (*SDPBfcp, error)) *SDPB
 	return b
 }
 
-// SetMLineOrder sets the m-line order for RFC 3264 compliant SDP generation.
-// This should be copied from the parsed offer to ensure the answer has the same order.
+// SetMLineOrder sets the m-line output order for SDP generation (RFC 3264).
 func (b *SDPBuilder) SetMLineOrder(order []MLineType) *SDPBuilder {
 	if len(order) > 0 {
 		b.s.MLineOrder = make([]MLineType, len(order))
@@ -524,7 +542,7 @@ func (b *SDPBuilder) SetMLineOrder(order []MLineType) *SDPBuilder {
 	return b
 }
 
-// SetUnknownMedia sets the unknown/rejected media for RFC 3264 compliant SDP generation.
+// SetUnknownMedia sets the rejected/unknown m-line placeholders (port=0).
 func (b *SDPBuilder) SetUnknownMedia(media []*SDPMedia) *SDPBuilder {
 	if len(media) > 0 {
 		b.s.UnknownMedia = make([]*SDPMedia, len(media))

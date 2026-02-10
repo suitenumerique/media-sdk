@@ -17,13 +17,22 @@ func (b *SDPBfcp) FromPion(md sdp.MediaDescription) error {
 	}
 
 	proto := strings.Join(md.MediaName.Protos, "/")
-	if !strings.Contains(strings.ToUpper(proto), "BFCP") {
+	isBFCPProto := strings.Contains(strings.ToUpper(proto), "BFCP")
+
+	// Also accept non-BFCP protocols if BFCP attributes are present
+	if !isBFCPProto && !hasBFCPAttributes(md.Attributes) {
 		return fmt.Errorf("expected BFCP protocol, got %s", proto)
 	}
 
 	b.Port = uint16(md.MediaName.Port.Value)
 	b.Disabled = b.Port == 0
-	b.Proto = BfcpProto(proto)
+
+	if isBFCPProto {
+		b.Proto = BfcpProto(proto)
+	} else {
+		// Cisco BFCP-over-RTP: treat as UDP/BFCP
+		b.Proto = BfcpProtoUDP
+	}
 
 	for _, attr := range md.Attributes {
 		switch attr.Key {
