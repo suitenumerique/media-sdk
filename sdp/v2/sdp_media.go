@@ -436,7 +436,7 @@ func (b *SDPMediaBuilder) AddDTMFCodec() *SDPMediaBuilder {
 		Name:        "telephone-event/8000",
 		PayloadType: 101,
 		ClockRate:   8000,
-		FMTP:        map[string]string{"": "0-16"},
+		FMTP:        map[string]string{"0-16": ""},
 	}
 	b.m.Codecs = append(b.m.Codecs, dtmfCodec)
 	return b
