@@ -346,16 +346,17 @@ func (s *SDP) ToPion() (sdp.SessionDescription, error) {
 				)
 			}
 		}
-		if s.Screenshare != nil && !addedScreenshare {
-			screenshareMD, err := s.Screenshare.ToPion()
-			if err == nil {
-				sd.MediaDescriptions = append(sd.MediaDescriptions, &screenshareMD)
-				slog.Debug("SDP ToPion: added screenshare media (extra)",
-					"port", screenshareMD.MediaName.Port.Value,
-					"content", s.Screenshare.Content,
-				)
-			}
-		}
+		_ = addedScreenshare
+		// if s.Screenshare != nil && !addedScreenshare {
+		// 	screenshareMD, err := s.Screenshare.ToPion()
+		// 	if err == nil {
+		// 		sd.MediaDescriptions = append(sd.MediaDescriptions, &screenshareMD)
+		// 		slog.Debug("SDP ToPion: added screenshare media (extra)",
+		// 			"port", screenshareMD.MediaName.Port.Value,
+		// 			"content", s.Screenshare.Content,
+		// 		)
+		// 	}
+		// }
 		if s.BFCP != nil && !s.BFCP.Disabled && !addedBFCP {
 			bfcpMD, err := s.BFCP.ToPion()
 			if err == nil {
