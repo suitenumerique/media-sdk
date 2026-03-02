@@ -91,20 +91,6 @@ func (b *SDPBfcp) parseFloorID(value string) {
 
 // ToPion converts SDPBfcp to a pion MediaDescription.
 func (b *SDPBfcp) ToPion() (sdp.MediaDescription, error) {
-	attrs := []sdp.Attribute{
-		{Key: "setup", Value: string(b.Setup)},
-		{Key: "connection", Value: string(b.Connection)},
-		{Key: "floorctrl", Value: string(b.FloorCtrl)},
-		{Key: "confid", Value: fmt.Sprintf("%d", b.ConfID)},
-		{Key: "userid", Value: fmt.Sprintf("%d", b.UserID)},
-	}
-
-	floorValue := fmt.Sprintf("%d", b.FloorID)
-	if b.MStreamID > 0 {
-		floorValue = fmt.Sprintf("%d mstrm:%d", b.FloorID, b.MStreamID)
-	}
-	attrs = append(attrs, sdp.Attribute{Key: "floorid", Value: floorValue})
-
 	protos := []string{"TCP", "BFCP"}
 	switch b.Proto {
 	case BfcpProtoUDP:
@@ -125,8 +111,28 @@ func (b *SDPBfcp) ToPion() (sdp.MediaDescription, error) {
 			Protos:  protos,
 			Formats: []string{"*"},
 		},
-		Attributes: attrs,
 	}
+
+	// Disabled (port 0) m-lines don't need attributes per RFC 3264
+	if b.Disabled {
+		return md, nil
+	}
+
+	attrs := []sdp.Attribute{
+		{Key: "setup", Value: string(b.Setup)},
+		{Key: "connection", Value: string(b.Connection)},
+		{Key: "floorctrl", Value: string(b.FloorCtrl)},
+		{Key: "confid", Value: fmt.Sprintf("%d", b.ConfID)},
+		{Key: "userid", Value: fmt.Sprintf("%d", b.UserID)},
+	}
+
+	floorValue := fmt.Sprintf("%d", b.FloorID)
+	if b.MStreamID > 0 {
+		floorValue = fmt.Sprintf("%d mstrm:%d", b.FloorID, b.MStreamID)
+	}
+	attrs = append(attrs, sdp.Attribute{Key: "floorid", Value: floorValue})
+
+	md.Attributes = attrs
 
 	// Add media-level c= line if ConnectionAddr is set
 	if b.ConnectionAddr.IsValid() {

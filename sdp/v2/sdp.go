@@ -292,7 +292,7 @@ func (s *SDP) ToPion() (sdp.SessionDescription, error) {
 					)
 				}
 			case MLineBFCP:
-				if s.BFCP != nil && !s.BFCP.Disabled {
+				if s.BFCP != nil {
 					bfcpMD, err := s.BFCP.ToPion()
 					if err != nil {
 						return sd, fmt.Errorf("failed to convert BFCP media: %w", err)
@@ -357,7 +357,7 @@ func (s *SDP) ToPion() (sdp.SessionDescription, error) {
 		// 		)
 		// 	}
 		// }
-		if s.BFCP != nil && !s.BFCP.Disabled && !addedBFCP {
+		if s.BFCP != nil && !addedBFCP {
 			bfcpMD, err := s.BFCP.ToPion()
 			if err == nil {
 				sd.MediaDescriptions = append(sd.MediaDescriptions, &bfcpMD)
@@ -402,7 +402,7 @@ func (s *SDP) ToPion() (sdp.SessionDescription, error) {
 				"content", s.Screenshare.Content,
 			)
 		}
-		if s.BFCP != nil && !s.BFCP.Disabled {
+		if s.BFCP != nil {
 			bfcpMD, err := s.BFCP.ToPion()
 			if err != nil {
 				return sd, fmt.Errorf("failed to convert BFCP media: %w", err)
