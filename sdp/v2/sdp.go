@@ -55,18 +55,33 @@ func (s *SDP) Marshal() ([]byte, error) {
 }
 
 func (s *SDP) FromPion(sd sdp.SessionDescription) error {
-	addr, err := netip.ParseAddr(sd.Origin.UnicastAddress)
-	if err != nil {
-		return err
+	// Use session-level c= (connection) address, fall back to o= (origin) address.
+	if sd.ConnectionInformation != nil && sd.ConnectionInformation.Address != nil {
+		addr, err := netip.ParseAddr(sd.ConnectionInformation.Address.Address)
+		if err != nil {
+			return err
+		}
+		s.Addr = addr
+	} else {
+		addr, err := netip.ParseAddr(sd.Origin.UnicastAddress)
+		if err != nil {
+			return err
+		}
+		s.Addr = addr
 	}
-	s.Addr = addr
 
 	// Initialize m-line order tracking
 	s.MLineOrder = make([]MLineType, 0, len(sd.MediaDescriptions))
 	s.UnknownMedia = nil
 
+	connAddr := ""
+	if sd.ConnectionInformation != nil && sd.ConnectionInformation.Address != nil {
+		connAddr = sd.ConnectionInformation.Address.Address
+	}
 	slog.Debug("SDP FromPion: parsing session",
 		"origin", sd.Origin.UnicastAddress,
+		"connection", connAddr,
+		"addr", s.Addr.String(),
 		"sessionName", string(sd.SessionName),
 		"mediaCount", len(sd.MediaDescriptions),
 	)
