@@ -300,16 +300,10 @@ func (m *SDPMedia) ToPion() (sdp.MediaDescription, error) {
 			})
 		}
 
-		if len(codec.RTCPFB) > 0 {
+		for _, fb := range codec.RTCPFB {
 			attrs = append(attrs, sdp.Attribute{
-				Key: "rtcp-fb",
-				Value: strings.Join(func() []string {
-					parts := make([]string, 0, len(codec.RTCPFB))
-					for _, fb := range codec.RTCPFB {
-						parts = append(parts, fb.Value)
-					}
-					return parts
-				}(), " "),
+				Key:   "rtcp-fb",
+				Value: fb.Value,
 			})
 		}
 	}
